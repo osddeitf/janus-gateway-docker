@@ -1,12 +1,17 @@
-FROM alpine
+FROM debian:buster-slim AS mc
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends wget ca-certificates
+RUN wget https://dl.min.io/client/mc/release/linux-amd64/mc && \
+  chmod +x mc
+
+FROM alpine AS clone
 WORKDIR /clone
 RUN apk add git
 RUN git clone https://github.com/cisco/libsrtp -b v2.3.0 --depth=1 && \
 	git clone https://gitlab.freedesktop.org/libnice/libnice -b 0.1.17 --depth=1 && \
 	git clone https://github.com/meetecho/janus-gateway -b v0.10.2 --depth=1
 
-FROM debian:buster-slim
-
+FROM debian:buster-slim AS build
 RUN apt-get -y update && \
 	apt-get install -y --no-install-recommends \
 		libmicrohttpd-dev \
@@ -25,7 +30,6 @@ RUN apt-get -y update && \
 		libtool \
 		automake \
 		build-essential \
-		wget \
 		git \
 		gtk-doc-tools \
 		ca-certificates \
@@ -34,7 +38,7 @@ RUN apt-get -y update && \
 	rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp
-COPY --from=0 /clone .
+COPY --from=clone /clone .
 
 RUN cd libsrtp && \
 	./configure --prefix=/usr --enable-openssl && \
@@ -66,20 +70,23 @@ LABEL git_branch=${GIT_BRANCH}
 LABEL git_commit=${GIT_COMMIT}
 LABEL version=${VERSION}
 
-COPY --from=1 /usr/lib/libsrtp2.so.1 /usr/lib/libsrtp2.so.1
+COPY --from=build /usr/lib/libsrtp2.so.1 /usr/lib/libsrtp2.so.1
 RUN ln -s /usr/lib/libsrtp2.so.1 /usr/lib/libsrtp2.so
 
-COPY --from=1 /usr/lib/libnice.la /usr/lib/libnice.la
-COPY --from=1 /usr/lib/libnice.so.10.10.0 /usr/lib/libnice.so.10.10.0
+COPY --from=build /usr/lib/libnice.la /usr/lib/libnice.la
+COPY --from=build /usr/lib/libnice.so.10.10.0 /usr/lib/libnice.so.10.10.0
 RUN ln -s /usr/lib/libnice.so.10.10.0 /usr/lib/libnice.so.10
 RUN ln -s /usr/lib/libnice.so.10.10.0 /usr/lib/libnice.so
 
-COPY --from=1 /usr/local/bin/janus /usr/local/bin/janus
-COPY --from=1 /usr/local/bin/janus-cfgconv /usr/local/bin/janus-cfgconv
-COPY --from=1 /usr/local/bin/janus-pp-rec /usr/local/bin/janus-pp-rec
-COPY --from=1 /usr/local/etc/janus /usr/local/etc/janus
-COPY --from=1 /usr/local/lib/janus /usr/local/lib/janus
-COPY --from=1 /usr/local/share/janus /usr/local/share/janus
+COPY --from=build /usr/local/bin/janus /usr/local/bin/janus
+COPY --from=build /usr/local/bin/janus-cfgconv /usr/local/bin/janus-cfgconv
+COPY --from=build /usr/local/bin/janus-pp-rec /usr/local/bin/janus-pp-rec
+COPY --from=build /usr/local/etc/janus /usr/local/etc/janus
+COPY --from=build /usr/local/lib/janus /usr/local/lib/janus
+COPY --from=build /usr/local/share/janus /usr/local/share/janus
+
+COPY --from=mc mc /usr/local/bin/mc
+RUN mc config host rm s3
 
 RUN apt-get -y update && \
 	apt-get install -y --no-install-recommends \
@@ -94,7 +101,9 @@ RUN apt-get -y update && \
 		libwebsockets8 \
 		libnanomsg5 \
 		librabbitmq4 \
-		libavutil56 libavcodec58 libavformat58 && \
+		libavutil56 libavcodec58 libavformat58 \
+		ca-certificates \
+		inotify-tools task-spooler ffmpeg jq && \
 	apt-get clean && \
 	rm -rf /var/lib/apt/lists/*
 
@@ -111,4 +120,7 @@ EXPOSE 8000
 EXPOSE 7088
 EXPOSE 7089
 
-CMD ["/usr/local/bin/janus"]
+WORKDIR /
+VOLUME [ "/data" ]
+COPY docker-entrypoint.sh post-process.sh ./
+ENTRYPOINT janus --daemon --log-file=/log.txt && ./docker-entrypoint.sh
