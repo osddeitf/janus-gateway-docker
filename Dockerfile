@@ -121,6 +121,5 @@ EXPOSE 7088
 EXPOSE 7089
 
 WORKDIR /
-VOLUME [ "/data" ]
-COPY docker-entrypoint.sh post-process.sh ./
-ENTRYPOINT janus --daemon --log-file=/log.txt && ./docker-entrypoint.sh
+COPY scripts .
+ENTRYPOINT ./docker-entrypoint.sh

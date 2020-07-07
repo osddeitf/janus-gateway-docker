@@ -28,6 +28,19 @@ if [ $status != 0 ]; then
   fi
 fi
 
-inotifywait -e close_write --format %f --monitor /data |\
-  xargs -d'\n' -n1 -I{} \
-    sh -c "tsp ./post-process.sh {} > /dev/null && echo Added \'{}\' to post-process queue."
+# Add file extensions .mjr -> .mjr.tmp
+sed -i 's/#recordings_tmp_ext/recordings_tmp_ext="tmp"#/' /usr/local/etc/janus/janus.jcfg
+
+# Check the existence of $RECORD_DIR
+[ -f $RECORD_DIR ] || mkdir $RECORD_DIR
+if [ ! -d $RECORD_DIR ]; then
+  echo $RECORD_DIR is not a directory > /dev/stderr
+  exit 1
+fi
+
+# Watch
+tsp -S 2
+tsp ./watch.sh $RECORD_DIR
+
+# Janus
+cd $RECORD_DIR && janus
